@@ -15,7 +15,7 @@ The approach is entirely **matrix-based**, relying on geometric transformations 
 ## ✨ Key Features
 
 - **EXIF-Aware Loading** — Automatically corrects image rotation from camera metadata.
-- **Stable Global Alignment (SIFT + RANSAC Affine)** — Uses Scale-Invariant Feature Transform (SIFT) with FLANN matching and a partial 2D affine estimator (4 DOF: rotation, translation, uniform scale) to avoid spiral/vortex artifacts caused by unconstrained homography.
+- **Stable Global Alignment (SIFT + RANSAC Affine)** — Uses Scale-Invariant Feature Transform (SIFT) with exact brute-force matching (BFMatcher) and a partial 2D affine estimator (4 DOF: rotation, translation, uniform scale) to avoid spiral/vortex artifacts caused by unconstrained homography.
 - **Sanity-Checked Transformation** — Rejects any estimated transform whose scale factor falls outside a safe range (0.1× – 10×).
 - **Per-Pixel Optical Flow Refinement** — Farneback dense optical flow corrects residual sub-pixel misalignment after global alignment.
 - **Sharpness-Informed Weight Map** — A Laplacian-variance map identifies which pixels in the reference image are sharper than the corresponding pixels in the base image.
@@ -36,7 +36,7 @@ Input: M1 (blurry base)  +  M2 (sharp reference)
          S1 │ EXIF-Correct Load
                    │
          S2 │ Stable Global Alignment
-            │   SIFT keypoints → FLANN → Lowe's ratio test
+            │   SIFT keypoints → BFMatcher → Lowe's ratio test
             │   estimateAffinePartial2D (RANSAC)
             │   Sanity check on scale factor
                    │
@@ -134,9 +134,9 @@ python compute_metrics.py
 **Sample Output:**
 ```
 === ROI Sharpness Benchmark ===
-Original Blurry Base (M1)   : 42.87
-Enhanced Output (Result)    : 118.64
-Sharpness Improvement       : +176.73%
+Original Blurry Base (M1)   : 60.02
+Enhanced Output (Result)    : 1540.63
+Sharpness Improvement       : +2466.87%
 ```
 
 ---
@@ -188,8 +188,11 @@ Open the URL shown in the terminal (typically `http://localhost:8501`) and uploa
 **Laplacian Variance (Sharpness Proxy):**
 $$\sigma^2_{\text{lap}} = \text{Var}\!\left(\nabla^2 I\right)$$
 
-**Weight Map (per-pixel sharpness advantage of M2 over M1):**
-$$W(x,y) = \text{clip}\!\left(\sigma^2_{M2}(x,y) - \sigma^2_{M1}(x,y),\ 0,\ 1\right)$$
+**Weight Map (clipped and range-normalized absolute relative sharpness advantage of M2 over M1):**
+$$D(x,y) = \max\!\left(0,\ \sigma_{M2}(x,y) - \sigma_{M1}(x,y)\right)$$
+$$W(x,y) = \frac{D(x,y)}{\max_{x',y'} D(x',y')}$$
+
+where $\sigma(x,y)$ represents the raw, absolute local standard deviation of the Laplacian. Zero-clipping prevents detail bleed in regions where the base image is already sharper or equal.
 
 **LAB Detail Injection:**
 $$L_{\text{enhanced}} = L_{M1} + \left(L_{M2} - \widetilde{L}_{M2}\right) \cdot W$$
