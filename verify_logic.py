@@ -82,12 +82,17 @@ def main():
     roi_m1 = m1[y1:y2, x1:x2]
     roi_ref = refined_full[y1:y2, x1:x2]
     
-    # Local weight map
+    # Local weight map: high where ref is sharper than base in absolute terms
     g_m1 = cv2.cvtColor(roi_m1, cv2.COLOR_BGR2GRAY)
     g_ref = cv2.cvtColor(roi_ref, cv2.COLOR_BGR2GRAY)
     s1 = laplacian_variance_map(g_m1)
     s2 = laplacian_variance_map(g_ref)
-    weight = cv2.normalize(s2 - s1, None, 0, 1, cv2.NORM_MINMAX)
+    diff = np.clip(s2 - s1, 0, None)
+    max_val = diff.max()
+    if max_val > 1e-5:
+        weight = diff / max_val
+    else:
+        weight = np.zeros_like(diff)
     
     print("Step 3: LAB Frequency Fusion...")
     fused_roi = lab_frequency_fusion(roi_m1, roi_ref, weight)

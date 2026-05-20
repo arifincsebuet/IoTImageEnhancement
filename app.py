@@ -61,11 +61,9 @@ def stable_alignment(m1: np.ndarray, m2: np.ndarray, max_features: int = 4000):
     if d1 is None or d2 is None or len(kp1) < 10 or len(kp2) < 10:
         return None, 0
 
-    # FLANN Matcher for SIFT
-    index_params = dict(algorithm=1, trees=5)
-    search_params = dict(checks=50)
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    matches = flann.knnMatch(d2, d1, k=2)
+    # Robust BFMatcher for SIFT (much more deterministic and stable than FLANN)
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(d2, d1, k=2)
 
     good = []
     for m, n in matches:
@@ -106,8 +104,8 @@ def get_sharpness_map(img: np.ndarray):
     # Variance in local neighborhood
     mu = cv2.GaussianBlur(lap, (21, 21), 0)
     mu2 = cv2.GaussianBlur(lap**2, (21, 21), 0)
-    sigma = cv2.sqrt(cv2.max(0, mu2 - mu**2))
-    return cv2.normalize(sigma, None, 0, 1, cv2.NORM_MINMAX)
+    sigma = cv2.sqrt(np.maximum(0.0, mu2 - mu**2))
+    return sigma
 
 def lab_frequency_fusion(roi_blurry, roi_sharp, weight_map):
     """Blends sharp details into blurry base with proper L-channel clipping."""
@@ -173,13 +171,20 @@ def run_pipeline(m1, m2, roi, max_features, clahe_clip, sharp_str, use_flow=True
     roi_m1 = m1[y1:y2, x1:x2]
     roi_m2 = warped_m2[y1:y2, x1:x2]
     
-    # Generate Weight Map based on relative sharpness
+    # Generate Weight Map based on relative sharpness (absolute difference)
     s1 = get_sharpness_map(roi_m1)
     s2 = get_sharpness_map(roi_m2)
     
-    # Weight map: high where m2 is sharper than m1
-    weight = (s2 - s1)
-    weight = np.clip(weight, 0, 1)
+    # Weight map: high where m2 is sharper than m1 in absolute terms
+    diff = s2 - s1
+    diff = np.clip(diff, 0, None)
+    
+    # Normalize absolute difference to [0, 1] range to avoid detail bleed
+    max_val = diff.max()
+    if max_val > 1e-5:
+        weight = diff / max_val
+    else:
+        weight = np.zeros_like(diff)
     
     # S4: Fusion
     enhanced_roi = lab_frequency_fusion(roi_m1, roi_m2, weight)
